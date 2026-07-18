@@ -1342,14 +1342,6 @@ class _GameTableScreenState extends State<GameTableScreen> {
                             style: const TextStyle(color: Colors.white60, fontSize: 13),
                             textAlign: TextAlign.center,
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            vaultPreview ? "(Chip ranking OK for vault)" : "(Chip ranking fails)",
-                            style: TextStyle(
-                              color: vaultPreview ? Colors.greenAccent : Colors.redAccent,
-                              fontSize: 14,
-                            ),
-                          ),
                         ],
                         if (phase == 'GAME_OVER') ...[
                           const SizedBox(height: 20),
