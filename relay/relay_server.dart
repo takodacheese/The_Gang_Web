@@ -28,6 +28,9 @@ Future<void> main(List<String> args) async {
   final port = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8080;
   final webRoot = args.isNotEmpty ? args[0] : 'build/web';
   final server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+  // Gzip responses (2.7MB main.dart.js + 7.2MB canvaskit shrink ~4x) — without
+  // this, first load on a small cloud instance feels like loading forever.
+  server.autoCompress = true;
   print('The Gang relay listening on http://localhost:$port (web root: $webRoot)');
 
   await for (final request in server) {
