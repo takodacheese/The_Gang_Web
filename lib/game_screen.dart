@@ -34,6 +34,11 @@ class _GameTableScreenState extends State<GameTableScreen> {
   bool _isBusy = false;
   double _seatCardScale = 1.0; // showdown card size at seats (settings slider)
 
+  /// Responsive scale for the fixed-size table elements (cards, seats, chips):
+  /// 1.0 on a large desktop window, down to 0.40 on a phone. Set every build
+  /// from the current viewport before anything is laid out.
+  double _ui = 1.0;
+
   // Chip flight animation: previous claims -> detect owner changes -> fly a
   // chip from its old spot (center pool or old owner's seat) to the new seat.
   StreamSubscription<List<Map<String, dynamic>>>? _playersSub;
@@ -371,7 +376,7 @@ class _GameTableScreenState extends State<GameTableScreen> {
         ),
         const SizedBox(height: 8),
         Wrap(
-          spacing: 15,
+          spacing: 15 * _ui,
           runSpacing: 12,
           alignment: WrapAlignment.center,
           children: List.generate(cap, (index) {
@@ -384,7 +389,8 @@ class _GameTableScreenState extends State<GameTableScreen> {
                   : null,
               child: Opacity(
                 opacity: taken ? 0.35 : 1,
-                child: _roundChipFace(phase: phase, rank: rank, radius: 30, dimmed: taken),
+                child: _roundChipFace(
+                    phase: phase, rank: rank, radius: max(21.0, 30 * _ui), dimmed: taken),
               ),
             );
           }),
@@ -427,8 +433,8 @@ class _GameTableScreenState extends State<GameTableScreen> {
                     child: PlayingCardView(
                       key: ValueKey('$i-${me.hand[i]}'),
                       card: me.hand[i],
-                      width: 165,
-                      height: 230,
+                      width: 165 * _ui,
+                      height: 230 * _ui,
                     ),
                   ),
                 ),
@@ -469,7 +475,7 @@ class _GameTableScreenState extends State<GameTableScreen> {
         chipPickTurnUserId == widget.playerId &&
         !iHaveChipThisRound;
 
-    const miniR = 20.0;
+    final miniR = max(14.0, 20.0 * _ui); // seat chips stay tappable on phones
 
     if (isFuture) {
       return Tooltip(
@@ -563,8 +569,8 @@ class _GameTableScreenState extends State<GameTableScreen> {
     if (players.isEmpty) return const [];
     final w = box.maxWidth;
     final h = box.maxHeight;
-    const seatW = 230.0;
-    const seatH = 260.0;
+    final seatW = 230.0 * _ui;
+    final seatH = 260.0 * _ui;
 
     // You always sit at the bottom; the rest keep seat order clockwise.
     final myIdx = players.indexWhere((p) => p.userId == widget.playerId);
@@ -577,7 +583,7 @@ class _GameTableScreenState extends State<GameTableScreen> {
       final x = (w / 2 + w * 0.44 * cos(theta) - seatW / 2).clamp(8.0, w - seatW - 8);
       final y = (h / 2 + h * 0.40 * sin(theta) - seatH / 2).clamp(64.0, h - seatH - 8);
       // Approximate center of the seat's chip pill, for flight animations.
-      _seatChipPos[rotated[i].userId] = Offset(x + seatW / 2, y + seatH - 45);
+      _seatChipPos[rotated[i].userId] = Offset(x + seatW / 2, y + seatH - 45 * _ui);
       seats.add(Positioned(
         left: x,
         top: y,
@@ -616,9 +622,9 @@ class _GameTableScreenState extends State<GameTableScreen> {
             : const [],
       ),
       child: CircleAvatar(
-        radius: 30,
+        radius: 30 * _ui,
         backgroundColor: Colors.grey.shade300,
-        child: Icon(Icons.person, size: 40, color: Colors.grey.shade700),
+        child: Icon(Icons.person, size: 40 * _ui, color: Colors.grey.shade700),
       ),
     );
 
@@ -653,7 +659,7 @@ class _GameTableScreenState extends State<GameTableScreen> {
           style: TextStyle(
             color: isTurn ? Colors.amber : Colors.white,
             fontWeight: isTurn ? FontWeight.bold : FontWeight.w600,
-            fontSize: 16,
+            fontSize: max(11, 16 * _ui),
           ),
         ),
         const SizedBox(height: 6),
@@ -665,7 +671,9 @@ class _GameTableScreenState extends State<GameTableScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: PlayingCardView(
-                      card: c, width: 66 * _seatCardScale, height: 92 * _seatCardScale),
+                      card: c,
+                      width: 66 * _seatCardScale * _ui,
+                      height: 92 * _seatCardScale * _ui),
                 ),
             ],
           ),
@@ -679,9 +687,9 @@ class _GameTableScreenState extends State<GameTableScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (var i = 0; i < player.hand.length; i++)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 2),
-                  child: PlayingCardView(card: null, width: 48, height: 67),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: PlayingCardView(card: null, width: 48 * _ui, height: 67 * _ui),
                 ),
             ],
           ),
@@ -773,7 +781,7 @@ class _GameTableScreenState extends State<GameTableScreen> {
         color: Colors.black54,
         alignment: Alignment.center,
         child: Container(
-          width: 440,
+          width: min(440, MediaQuery.of(context).size.width - 32),
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: const Color(0xFF1C2620),
@@ -858,8 +866,12 @@ class _GameTableScreenState extends State<GameTableScreen> {
     final allAgree = picks.length == voters.length && picks.values.toSet().length == 1;
     final iConfirmed = confirms.contains(widget.playerId);
     final canConfirm = iAmVoter && allAgree && !iConfirmed && !_isBusy;
-    const size = 500.0;
-    const optionD = 58.0;
+    final viewport = MediaQuery.of(context).size;
+    // Fit the wheel on phones: shrink to the viewport, keep options tappable.
+    final size = min(500.0, min(viewport.width, viewport.height - 90) - 16);
+    final wheelScale = size / 500.0;
+    final optionD = max(42.0, 58.0 * wheelScale);
+    final ringR = size / 2 - optionD / 2 - 14;
 
     return Positioned.fill(
       child: Container(
@@ -878,11 +890,14 @@ class _GameTableScreenState extends State<GameTableScreen> {
                   Positioned.fill(
                     child: Center(
                       child: SizedBox(
-                        width: 210,
+                        width: 210 * wheelScale,
                         child: Text(
                           title,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: max(11, 14 * wheelScale),
+                              fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -891,17 +906,17 @@ class _GameTableScreenState extends State<GameTableScreen> {
                     () {
                       final opt = options[i];
                       final angle = -pi / 2 + 2 * pi * i / options.length;
-                      final cx = size / 2 + cos(angle) * 185;
-                      final cy = size / 2 + sin(angle) * 185;
+                      final cx = size / 2 + cos(angle) * ringR;
+                      final cy = size / 2 + sin(angle) * ringR;
                       final othersHere = [
                         for (final e in picks.entries)
                           if (e.value == opt && e.key != widget.playerId) nameOf[e.key] ?? '?',
                       ];
                       final mine = myPick == opt;
                       return Positioned(
-                        left: cx - 40,
+                        left: cx - optionD * 0.7,
                         top: cy - optionD / 2,
-                        width: 80,
+                        width: optionD * 1.4,
                         child: GestureDetector(
                           onTap: iAmVoter && !_isBusy
                               ? () => widget.conn.castVote(widget.playerId, opt)
@@ -934,7 +949,9 @@ class _GameTableScreenState extends State<GameTableScreen> {
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold,
-                                      fontSize: kind == 'fingerprint' || kind == 'choose_player' ? 9 : 16,
+                                      fontSize: kind == 'fingerprint' || kind == 'choose_player'
+                                          ? max(7.5, 9 * wheelScale)
+                                          : max(12, 16 * wheelScale),
                                     ),
                                   ),
                                 ),
@@ -1276,13 +1293,14 @@ class _GameTableScreenState extends State<GameTableScreen> {
               final aux = AdvancedAuxState.decode(gameData['advanced_aux']);
 
               return LayoutBuilder(builder: (context, box) {
+              _ui = min(box.maxWidth / 1450, box.maxHeight / 850).clamp(0.40, 1.0);
               // Approximate center-pool chip positions (for flight animations).
               _poolChipPos.clear();
               final poolCap = _starCapForPlayerCount(players.length);
               for (var r = 1; r <= poolCap; r++) {
                 _poolChipPos[r] = Offset(
-                  box.maxWidth / 2 + (r - (poolCap + 1) / 2) * 75,
-                  box.maxHeight / 2 + 150,
+                  box.maxWidth / 2 + (r - (poolCap + 1) / 2) * 75 * _ui,
+                  box.maxHeight / 2 + 150 * _ui,
                 );
               }
               return Stack(
@@ -1399,7 +1417,9 @@ class _GameTableScreenState extends State<GameTableScreen> {
                   // 3a. Turn banner (top center)
                   if (_chipPhases.contains(phase))
                     Positioned(
-                      top: 14, left: 160, right: 160,
+                      top: _ui < 0.6 ? 60 : 14, // below the corner buttons on phones
+                      left: max(80, 160 * _ui),
+                      right: max(80, 160 * _ui),
                       child: _chipTurnBanner(phase, currentTurnUserId, players),
                     ),
 
@@ -1522,7 +1542,7 @@ class _GameTableScreenState extends State<GameTableScreen> {
         final isRevealed = index < visible && cards.isNotEmpty;
         final displayValue = isRevealed ? cards[index] : null;
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: EdgeInsets.symmetric(horizontal: 4 * _ui),
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 400),
             transitionBuilder: (child, anim) => ScaleTransition(
@@ -1532,8 +1552,8 @@ class _GameTableScreenState extends State<GameTableScreen> {
             child: PlayingCardView(
               key: ValueKey(displayValue ?? 'back-$index'),
               card: displayValue,
-              width: 160,
-              height: 222,
+              width: 160 * _ui,
+              height: 222 * _ui,
             ),
           ),
         );
