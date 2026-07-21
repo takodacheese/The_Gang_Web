@@ -13,6 +13,7 @@ class PlayerModel {
   final int? claimTurn;
   final int? claimRiver;
   final int? seatIndex;
+  final bool connected;
 
   PlayerModel({
     required this.id,
@@ -24,6 +25,7 @@ class PlayerModel {
     this.claimTurn,
     this.claimRiver,
     this.seatIndex,
+    this.connected = true,
   });
 
   factory PlayerModel.fromMap(Map<String, dynamic> map) {
@@ -37,6 +39,7 @@ class PlayerModel {
       claimTurn: map['claim_turn'] as int?,
       claimRiver: map['claim_river'] as int?,
       seatIndex: map['seat_index'] as int?,
+      connected: map['connected'] != false,
     );
   }
 

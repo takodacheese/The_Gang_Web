@@ -112,6 +112,9 @@ class RelayRemoteClient implements GameConnection {
   @override
   void confirmVote(String userId) => _send({'op': 'voteConfirm', 'userId': userId});
 
+  @override
+  void kickPlayer(String actingUserId, String targetUserId) => _hostOnly();
+
   // Host-only: the UI never shows these controls to a non-host player. If one of
   // these ever fires here, that's a UI gating bug, not a legitimate no-op.
   void _hostOnly() {

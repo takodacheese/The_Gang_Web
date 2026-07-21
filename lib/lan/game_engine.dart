@@ -79,6 +79,7 @@ class GameEngine {
     final existing = _playerByUserId(userId);
     if (existing != null) {
       existing['display_name'] = displayName;
+      existing['connected'] = true; // rejoin after a refresh/drop
       return;
     }
     // A started game is closed: new players can only be seated in the lobby.
@@ -93,7 +94,48 @@ class GameEngine {
       'claim_turn': null,
       'claim_river': null,
       'seat_index': players.length,
+      'connected': true,
     });
+  }
+
+  /// Relay-reported disconnect. In the lobby the seat is simply freed; in a
+  /// running game the seat is kept (they can rejoin with the same identity)
+  /// and marked offline so the host can decide to kick.
+  void playerDropped(String userId) {
+    final p = _playerByUserId(userId);
+    if (p == null) return;
+    if (game['status'] == 'LOBBY') {
+      players.remove(p);
+      _reindexSeats();
+    } else {
+      p['connected'] = false;
+    }
+  }
+
+  /// Host-only. Removing a player mid-heist invalidates the deal, so the
+  /// current heist is aborted and redealt for the remaining players (scores
+  /// and queued cards untouched — the active cards go back to "queued").
+  void kickPlayer(String actingUserId, String targetUserId) {
+    if (actingUserId != game['host_user_id']) return;
+    if (targetUserId == game['host_user_id']) return;
+    final target = _playerByUserId(targetUserId);
+    if (target == null) return;
+    final status = game['status'] as String?;
+    final midGame = status != 'LOBBY' && status != 'GAME_OVER';
+    players.remove(target);
+    _reindexSeats();
+    if (midGame && players.isNotEmpty) {
+      game['challenge_queued'] = game['challenge_active'] ?? game['challenge_queued'];
+      game['specialist_queued'] = game['specialist_active'] ?? game['specialist_queued'];
+      dealInitialCards();
+    }
+  }
+
+  void _reindexSeats() {
+    final sorted = playersOrdered;
+    for (var i = 0; i < sorted.length; i++) {
+      sorted[i]['seat_index'] = i;
+    }
   }
 
   int _emoteSeq = 0;

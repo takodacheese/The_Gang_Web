@@ -33,6 +33,7 @@ dependencies:
   google_fonts: ^6.0.0 # For that "Heist" aesthetic
   dotted_border: ^2.1.0 # For card placeholders
   web_socket_channel: ^3.0.3
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

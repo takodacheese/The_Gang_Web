@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'advanced_aux_state.dart';
 import 'advanced_cards.dart';
 import 'lan/game_connection.dart';
@@ -65,11 +67,44 @@ class _GameTableScreenState extends State<GameTableScreen> {
   int? _ruleChallengeId;
   int? _ruleSpecialistId;
 
+  // Seat dragging (local only): userId -> fractional position, persisted per
+  // room in this browser. Other players' screens are unaffected.
+  final Map<String, Offset> _seatDragPos = {};
+  String? _seatPrefsRoom;
+  SharedPreferences? _prefs;
+
   @override
   void initState() {
     super.initState();
     _playersSub = widget.conn.playersStream.listen(_onPlayersForFlights);
     _gameSub = widget.conn.gameStream.listen(_onGameUpdate);
+    SharedPreferences.getInstance().then((p) {
+      _prefs = p;
+      if (mounted) setState(() {}); // re-run build so saved seat spots load
+    });
+  }
+
+  void _loadSeatPositionsFor(String roomCode) {
+    _seatPrefsRoom = roomCode;
+    _seatDragPos.clear();
+    final raw = _prefs?.getString('seat_pos_$roomCode');
+    if (raw == null) return;
+    try {
+      (jsonDecode(raw) as Map<String, dynamic>).forEach((uid, v) {
+        if (v is List && v.length == 2) {
+          _seatDragPos[uid] = Offset((v[0] as num).toDouble(), (v[1] as num).toDouble());
+        }
+      });
+    } catch (_) {}
+  }
+
+  void _saveSeatPositions() {
+    final room = _seatPrefsRoom;
+    if (room == null) return;
+    _prefs?.setString(
+      'seat_pos_$room',
+      jsonEncode({for (final e in _seatDragPos.entries) e.key: [e.value.dx, e.value.dy]}),
+    );
   }
 
   @override
@@ -579,16 +614,32 @@ class _GameTableScreenState extends State<GameTableScreen> {
     final seats = <Widget>[];
     _seatChipPos.clear();
     for (var i = 0; i < rotated.length; i++) {
+      final uid = rotated[i].userId;
       final theta = pi / 2 + 2 * pi * i / rotated.length;
-      final x = (w / 2 + w * 0.44 * cos(theta) - seatW / 2).clamp(8.0, w - seatW - 8);
-      final y = (h / 2 + h * 0.40 * sin(theta) - seatH / 2).clamp(64.0, h - seatH - 8);
+      // Dragged seats use the saved fractional spot; others sit on the ellipse.
+      final drag = _seatDragPos[uid];
+      final x = drag != null
+          ? (drag.dx * (w - seatW)).clamp(0.0, w - seatW)
+          : (w / 2 + w * 0.44 * cos(theta) - seatW / 2).clamp(8.0, w - seatW - 8);
+      final y = drag != null
+          ? (drag.dy * (h - seatH)).clamp(0.0, h - seatH)
+          : (h / 2 + h * 0.40 * sin(theta) - seatH / 2).clamp(64.0, h - seatH - 8);
       // Approximate center of the seat's chip pill, for flight animations.
-      _seatChipPos[rotated[i].userId] = Offset(x + seatW / 2, y + seatH - 45 * _ui);
+      _seatChipPos[uid] = Offset(x + seatW / 2, y + seatH - 45 * _ui);
       seats.add(Positioned(
         left: x,
         top: y,
         width: seatW,
-        child: _seatView(rotated[i], players, board, phase, chipPickTurnUserId, aux),
+        child: GestureDetector(
+          onPanUpdate: (d) => setState(() {
+            _seatDragPos[uid] = Offset(
+              ((x + d.delta.dx).clamp(0.0, w - seatW)) / max(1.0, w - seatW),
+              ((y + d.delta.dy).clamp(0.0, h - seatH)) / max(1.0, h - seatH),
+            );
+          }),
+          onPanEnd: (_) => _saveSeatPositions(),
+          child: _seatView(rotated[i], players, board, phase, chipPickTurnUserId, aux),
+        ),
       ));
     }
     return seats;
@@ -612,7 +663,7 @@ class _GameTableScreenState extends State<GameTableScreen> {
         '${player.userId == widget.hostUserId ? ' (H)' : ''}'
         '${isMe ? ' — you' : ''}';
 
-    final avatar = Container(
+    final avatarCore = Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -627,6 +678,19 @@ class _GameTableScreenState extends State<GameTableScreen> {
         child: Icon(Icons.person, size: 40 * _ui, color: Colors.grey.shade700),
       ),
     );
+    final avatar = player.connected
+        ? avatarCore
+        : Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Opacity(opacity: 0.45, child: avatarCore),
+              const Positioned(
+                right: -2,
+                top: -2,
+                child: Icon(Icons.wifi_off, color: Colors.redAccent, size: 18),
+              ),
+            ],
+          );
 
     return Stack(
       clipBehavior: Clip.none,
@@ -662,6 +726,18 @@ class _GameTableScreenState extends State<GameTableScreen> {
             fontSize: max(11, 16 * _ui),
           ),
         ),
+        // Host may remove a disconnected player; mid-heist this redeals.
+        if (isHost && !player.connected && player.userId != widget.hostUserId)
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.redAccent,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 26),
+            ),
+            onPressed: _isBusy ? null : () => _confirmKick(player),
+            icon: const Icon(Icons.person_remove, size: 14),
+            label: const Text('Kick', style: TextStyle(fontSize: 11)),
+          ),
         const SizedBox(height: 6),
         if (revealHands && player.hand.isNotEmpty) ...[
           Row(
@@ -1003,6 +1079,26 @@ class _GameTableScreenState extends State<GameTableScreen> {
     );
   }
 
+  Future<void> _confirmKick(PlayerModel player) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Remove ${player.displayName}?'),
+        content: const Text(
+            'They are disconnected. Removing them mid-heist aborts the current hand and redeals for the remaining players.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      widget.conn.kickPlayer(widget.playerId, player.userId);
+    }
+  }
+
   void _showSettingsDialog() {
     showDialog<void>(
       context: context,
@@ -1294,6 +1390,10 @@ class _GameTableScreenState extends State<GameTableScreen> {
 
               return LayoutBuilder(builder: (context, box) {
               _ui = min(box.maxWidth / 1450, box.maxHeight / 850).clamp(0.40, 1.0);
+              final roomCode = gameData['room_code'] as String?;
+              if (roomCode != null && roomCode != _seatPrefsRoom && _prefs != null) {
+                _loadSeatPositionsFor(roomCode);
+              }
               // Approximate center-pool chip positions (for flight animations).
               _poolChipPos.clear();
               final poolCap = _starCapForPlayerCount(players.length);

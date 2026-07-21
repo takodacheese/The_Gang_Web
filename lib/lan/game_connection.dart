@@ -20,6 +20,9 @@ abstract class GameConnection {
   void castVote(String userId, String option);
   void confirmVote(String userId);
 
+  /// Host-only: remove a (disconnected) player; mid-heist this redeals.
+  void kickPlayer(String actingUserId, String targetUserId);
+
   /// Host-only: the UI only ever renders the controls that call these on the
   /// host's own [GameConnection] instance, so remote implementations are no-ops.
   void dealInitialCards();

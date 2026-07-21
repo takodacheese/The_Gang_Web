@@ -118,6 +118,9 @@ class RelayHost implements GameConnection {
       case 'voteConfirm':
         engine.confirmVote(msg['userId'] as String);
         break;
+      case 'playerDropped': // synthesized by the relay on guest disconnect
+        engine.playerDropped(msg['userId'] as String);
+        break;
       default:
         return;
     }
@@ -178,6 +181,12 @@ class RelayHost implements GameConnection {
   @override
   void confirmVote(String userId) {
     _engine!.confirmVote(userId);
+    _publish();
+  }
+
+  @override
+  void kickPlayer(String actingUserId, String targetUserId) {
+    _engine!.kickPlayer(actingUserId, targetUserId);
     _publish();
   }
 

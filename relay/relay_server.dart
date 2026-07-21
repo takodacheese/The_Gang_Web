@@ -45,6 +45,7 @@ Future<void> main(List<String> args) async {
 void _handleSocket(WebSocket socket) {
   String? code; // room this socket ended up in
   var isHost = false;
+  String? guestUserId; // from the join op, so drops can be reported to the host
 
   socket.listen(
     (raw) {
@@ -65,6 +66,7 @@ void _handleSocket(WebSocket socket) {
           socket.add(jsonEncode({'type': 'hosted'}));
         } else if (msg['op'] == 'join' && wanted != null && _rooms.containsKey(wanted)) {
           code = wanted;
+          guestUserId = msg['userId'] as String?;
           _rooms[wanted]!.guests.add(socket);
           _rooms[wanted]!.host.add(raw); // the join op doubles as the seat request
         } else {
@@ -86,12 +88,12 @@ void _handleSocket(WebSocket socket) {
         room.host.add(raw); // guest intents go to the host only
       }
     },
-    onDone: () => _leave(code, isHost, socket),
-    onError: (_) => _leave(code, isHost, socket),
+    onDone: () => _leave(code, isHost, socket, guestUserId),
+    onError: (_) => _leave(code, isHost, socket, guestUserId),
   );
 }
 
-void _leave(String? code, bool isHost, WebSocket socket) {
+void _leave(String? code, bool isHost, WebSocket socket, String? guestUserId) {
   final room = code == null ? null : _rooms[code];
   if (room == null) return;
   if (isHost) {
@@ -102,6 +104,10 @@ void _leave(String? code, bool isHost, WebSocket socket) {
     }
   } else {
     room.guests.remove(socket);
+    // Tell the host so the engine can mark the seat as disconnected.
+    if (guestUserId != null) {
+      room.host.add(jsonEncode({'op': 'playerDropped', 'userId': guestUserId}));
+    }
   }
 }
 

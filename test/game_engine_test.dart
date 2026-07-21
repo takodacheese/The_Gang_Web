@@ -212,6 +212,42 @@ void main() {
     expect(engine.game['specialist_queued'], 7);
   });
 
+  test('disconnect lifecycle: lobby frees the seat, mid-game marks offline, rejoin restores, kick redeals', () {
+    final engine = GameEngine(hostUserId: 'h1', advancedMode: false, roomCode: '7788');
+    engine.upsertPlayer('h1', 'Host');
+    engine.upsertPlayer('g1', 'G1');
+    engine.upsertPlayer('g2', 'G2');
+
+    // Lobby drop: seat freed entirely.
+    engine.playerDropped('g2');
+    expect(engine.players.length, 2);
+
+    engine.dealInitialCards();
+    final handBefore = List<String>.from(
+        engine.players.firstWhere((p) => p['user_id'] == 'g1')['hand_cards'] as List);
+
+    // Mid-game drop: seat kept, marked offline.
+    engine.playerDropped('g1');
+    final g1 = engine.players.firstWhere((p) => p['user_id'] == 'g1');
+    expect(g1['connected'], isFalse);
+    expect(engine.players.length, 2);
+
+    // Rejoin with the same identity: reconnected, hand untouched.
+    engine.upsertPlayer('g1', 'G1');
+    expect(g1['connected'], isTrue);
+    expect(List<String>.from(g1['hand_cards'] as List), handBefore);
+
+    // Kick: non-host rejected; host kick removes + redeals for the rest.
+    engine.playerDropped('g1');
+    engine.kickPlayer('g1', 'h1');
+    expect(engine.players.length, 2); // guests cannot kick
+    engine.kickPlayer('h1', 'g1');
+    expect(engine.players.any((p) => p['user_id'] == 'g1'), isFalse);
+    expect(engine.game['status'], 'PRE_FLOP'); // heist redealt
+    expect(
+        (engine.players.single['hand_cards'] as List).length, 2); // fresh hand for the remaining player
+  });
+
   test('specialist vote: group agrees who becomes the Muscle', () {
     final engine = GameEngine(
         hostUserId: 'h1', advancedMode: true, roomCode: '4242', forcedSpecialist: 10);

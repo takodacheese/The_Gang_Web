@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'advanced_cards.dart';
 import 'game_screen.dart';
 import 'lan/game_connection.dart';
@@ -49,9 +50,69 @@ class _EntryScreenState extends State<EntryScreen> {
   int? _customChallenge = 1;
   int? _customSpecialist = 1;
 
-  // 0xFFFFFFFF, not `1 << 32`: on the web (dart2js) shifts wrap at 32 bits,
-  // so `1 << 32` is 0 and nextInt(0) throws a RangeError.
-  late final String _playerId = 'guest_${Random.secure().nextInt(0xFFFFFFFF)}';
+  // Persistent identity: survives refresh/reopen so the engine recognizes a
+  // returning player and lets them back into a running game.
+  // (0xFFFFFFFF, not `1 << 32`: on the web shifts wrap at 32 bits -> 0.)
+  String _playerId = 'guest_${Random.secure().nextInt(0xFFFFFFFF)}';
+  SharedPreferences? _prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreSession();
+  }
+
+  Future<void> _restoreSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    _prefs = prefs;
+    final savedId = prefs.getString('player_id');
+    if (savedId != null) {
+      _playerId = savedId;
+    } else {
+      await prefs.setString('player_id', _playerId);
+    }
+    if (!mounted) return;
+    setState(() {
+      _nameController.text = prefs.getString('player_name') ?? '';
+      _roomController.text = prefs.getString('last_room') ?? '';
+    });
+
+    // Auto-rejoin: if we were a guest in a room, walk straight back in.
+    final lastRoom = prefs.getString('last_room');
+    final role = prefs.getString('last_role');
+    final name = _sanitizeName(_nameController.text);
+    if (lastRoom == null || !_validRoom(lastRoom) || !_validName(name)) return;
+    if (role != 'guest') {
+      // A host's engine died with their tab; that room is gone.
+      await prefs.remove('last_room');
+      await prefs.remove('last_role');
+      return;
+    }
+    await _withLoading(() async {
+      final client = await RelayRemoteClient.join(
+        roomCode: lastRoom,
+        userId: _playerId,
+        displayName: name,
+      );
+      final seated = client != null && client.currentPlayers.any((p) => p['user_id'] == _playerId);
+      if (!seated) {
+        client?.dispose();
+        await prefs.remove('last_room');
+        await prefs.remove('last_role');
+        return;
+      }
+      _openRoom(conn: client, hostUserId: client.currentGame['host_user_id'] as String);
+      _show('Reconnected to room $lastRoom');
+    });
+  }
+
+  Future<void> _rememberRoom(String name, String roomCode, String role) async {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    await prefs.setString('player_name', name);
+    await prefs.setString('last_room', roomCode);
+    await prefs.setString('last_role', role);
+  }
 
   @override
   void dispose() {
@@ -82,6 +143,7 @@ class _EntryScreenState extends State<EntryScreen> {
         forcedChallenge: _mode == 'custom' ? _customChallenge : null,
         forcedSpecialist: _mode == 'custom' ? _customSpecialist : null,
       );
+      await _rememberRoom(name, host.roomCode, 'host');
       _openRoom(conn: host, hostUserId: _playerId);
       _show('Room code: ${host.roomCode}');
     });
@@ -117,6 +179,7 @@ class _EntryScreenState extends State<EntryScreen> {
         _show('That game has already started — ask the host for a new room.');
         return;
       }
+      await _rememberRoom(name, roomCode, 'guest');
       _openRoom(conn: client, hostUserId: client.currentGame['host_user_id'] as String);
     });
   }
